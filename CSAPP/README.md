@@ -20,3 +20,9 @@
 [Attack Lab笔记](https://blog.csdn.net/lyy42995004/article/details/144042075)
 
 - **简单模拟Code Injection Attacks（代码注入攻击）（返回导向的编程）和Return-Oriented Programming攻击程序，模拟当黑客的感觉，了解函数的栈帧**
+
+## Cache Lab
+
+[Cache Lab 笔记](https://blog.csdn.net/lyy42995004/article/details/144071154)
+
+- **Part A写一个缓存模拟器，Part B优化矩阵转置函数，加深对缓存的理解**
