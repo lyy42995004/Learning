@@ -16,6 +16,7 @@ int main(int argc, char **argv)
 {
     int i, secs;
     pid_t pid; 
+    
 
     if (argc != 2) {
 	fprintf(stderr, "Usage: %s <n>\n", argv[0]);
