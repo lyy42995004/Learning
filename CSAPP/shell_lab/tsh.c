@@ -165,6 +165,41 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char* argv[MAXARGS];
+    int bg;
+    pid_t pid;
+    sigset_t mask;
+    bg = parseline(cmdline, argv);
+    if (!builtin_cmd(argv)) {
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGCHLD);
+        sigprocmask(SIG_BLOCK, &mask, NULL);
+        if ((pid = fork()) == 0) { // child
+            sigprocmask(SIG_UNBLOCK, &mask, NULL);
+
+            if (execvp(argv[0], argv) < 0) {
+                printf("%s: Command not found\n", argv[0]);
+                exit(1); 
+            }
+
+        } else if (pid > 0) { // parent
+            // 添加任务
+            if (!bg)
+                addjob(jobs, pid, FG, cmdline);
+            else
+                addjob(jobs, pid, BG, cmdline);
+            // 解除屏蔽
+            sigprocmask(SIG_UNBLOCK, &mask, NULL);
+            
+            if (!bg)
+                waitfg(pid); 
+            else
+                printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
+        } else {
+            unix_error("forking error");
+            return;
+        }
+    }
     return;
 }
 
@@ -231,6 +266,18 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    if (!strcmp(argv[0], "quit")) {
+        exit(0);
+    } else if (!strcmp(argv[0], "&")) {
+        return 1;
+    } else if (!strcmp(argv[0], "jobs")) {
+        listjobs(jobs);
+        return 1;
+    } else if (!strcmp(argv[0], "bg") || !strcmp(argv[0], "fg")) {
+        // bg or fg
+        do_bgfg(argv);
+        return 1;
+    }
     return 0;     /* not a builtin command */
 }
 
@@ -239,6 +286,47 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+    struct job_t* job;
+    char* tmp = argv[1];
+    int jid;
+    pid_t pid;
+
+    // 无id
+    if (tmp == NULL) {
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;
+    }
+
+    if (tmp[0] == '%') {
+        // jid
+        jid = atoi(tmp + 1);
+        job = getjobjid(jobs, jid);
+        if (job == NULL) {
+            printf("%s: No such job\n", tmp);  
+            return;  
+        } else {
+            pid = job->pid;
+        }
+    } else if (isdigit(tmp)) {
+        // pid
+        pid = atoi(tmp);
+        job = getjobpid(jobs, pid);
+        if (job == NULL) {  
+            printf("(%d): No such process\n", pid);  
+            return;  
+        }
+    } else {
+        printf("%s: argument must be a PID or %%jobid\n", argv[0]);
+        return;
+    }
+    kill(-pid, SIGCONT);
+    if (!strcmp(argv[0], "fg")) {
+        job->state = FG;
+        waitfg(pid);
+    } else {
+        printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
+        job->state = BG;
+    }
     return;
 }
 
@@ -247,6 +335,11 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+    struct job_t* job;
+    job = getjobpid(jobs, pid); 
+    if (job)
+        while (pid == fgpid(jobs))
+            usleep(100);
     return;
 }
 
@@ -263,6 +356,41 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    int olderrno = errno;
+    pid_t pid;
+    int status;
+    struct job_t* job;
+    sigset_t mask_all, prev_all;
+    sigfillset(&mask_all);
+
+    // 回收子进程
+    while ((pid = waitpid(fgpid(jobs), &status, WNOHANG | WUNTRACED)) > 0) {
+        job = getjobpid(jobs, pid);
+        if (WIFEXITED(status)) { 
+            // 正常退出，删除并返回
+            // 阻塞信号，保护全局数据结构，详见8.5.6
+            sigprocmask(SIG_SETMASK, &mask_all, &prev_all); 
+            deletejob(jobs, pid);
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        } else if (WIFSIGNALED(status)) {
+            // 由信号终止，打印信息，删除
+            printf("Job [%d] (%d) terminated by signal %d\n", job->jid, pid, WTERMSIG(status));
+            sigprocmask(SIG_SETMASK, &mask_all, &prev_all);
+            deletejob(jobs, pid);
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        }else if (WIFSTOPPED(status)) {
+            // 由信号停止，更改状态
+            printf("Job [%d] (%d) stopped by signal %d\n", job->jid, pid, WSTOPSIG(status));
+            sigprocmask(SIG_SETMASK, &mask_all, &prev_all);
+            job->state = ST;
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        }
+    }
+
+    if (pid < 0 && errno != ECHILD)
+        unix_error("waitpid fail");
+    errno = olderrno;
+
     return;
 }
 
@@ -273,6 +401,11 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+    int olderrno = errno;
+    pid_t pid = fgpid(jobs); // 得到前台进程id
+    if (pid)
+        kill(-pid, sig);
+    errno = olderrno;
     return;
 }
 
@@ -283,6 +416,11 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+    int olderrno = errno;
+    pid_t pid = fgpid(jobs);
+    if (pid)
+        kill(-pid, sig);
+    errno = olderrno;
     return;
 }
 
