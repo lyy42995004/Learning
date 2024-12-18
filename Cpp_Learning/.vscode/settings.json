@@ -6,5 +6,6 @@
         "type_traits": "cpp",
         "ostream": "cpp"
     },
-    "cmake.sourceDirectory": "/mnt/d/Programming/CPP/Cpp_Learning/CMakeTest"
+    "cmake.sourceDirectory": "/mnt/d/Programming/CPP/Cpp_Learning/CMakeTest",
+    "cmake.ignoreCMakeListsMissing": true
 }
