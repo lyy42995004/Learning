@@ -15,7 +15,7 @@ namespace chan
         void adjust_up(int child)
         {
             int parent = (child - 1) / 2;
-            while (child > 0)   
+            while (child > 0)
             {
                 if (_cmp(_con[parent], _con[child]))
                 {
